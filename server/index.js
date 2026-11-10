@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
@@ -80,6 +81,12 @@ app.use(express.static(path.join(here, "..", "public")));
 const port = Number(process.env.PORT) || 3000;
 app.listen(port, () => {
   console.log(`Tenfold running at http://localhost:${port}`);
+  // Addresses other devices on the same Wi-Fi (e.g. your phone) can use.
+  const lan = Object.values(os.networkInterfaces())
+    .flat()
+    .filter((n) => n.family === "IPv4" && !n.internal)
+    .map((n) => `http://${n.address}:${port}`);
+  if (lan.length) console.log(`On your phone (same Wi-Fi): ${lan.join("  or  ")}`);
   const provider = activeProvider();
   console.log(provider ? `Rewrites: on, using ${provider.name}` : "Rewrites: off (add GEMINI_API_KEY to a .env file to enable)");
 });

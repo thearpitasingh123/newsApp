@@ -115,7 +115,7 @@ export const SECTORS = [
     group: "Money & industry",
     feeds: [
       feed("STAT", "https://www.statnews.com/feed/"),
-      feed("Fierce Pharma", "https://www.fiercepharma.com/rss/xml"),
+      feed("BioPharma Dive", "https://www.biopharmadive.com/feeds/news/"),
       guardian("business/pharmaceuticals-industry"),
     ],
   },
@@ -162,7 +162,7 @@ export const SECTORS = [
     group: "Culture & fun",
     feeds: [
       feed("Soompi", "https://www.soompi.com/feed"),
-      feed("allkpop", "https://www.allkpop.com/feed"),
+      feed("Koreaboo", "https://www.koreaboo.com/feed/"),
       guardian("music/k-pop"),
     ],
   },
