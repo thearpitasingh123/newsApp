@@ -5,7 +5,7 @@
   "type": "module",
   "description": "A calm news reader: pick your sectors, max 10 stories each, three reading styles.",
   "scripts": {
-    "start": "node server/index.js",
+    "start": "node --env-file-if-exists=.env server/index.js",
     "test": "node --test"
   },
   "dependencies": {

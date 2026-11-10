@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import { SECTORS, MAX_STORIES_PER_SECTOR } from "./sectors.js";
 import { getSectorStories, getStory } from "./news.js";
-import { rewriteStory, aiAvailable, RewriteError, STYLES } from "./rewrite.js";
+import { rewriteStory, aiAvailable, activeProvider, RewriteError, STYLES } from "./rewrite.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -80,5 +80,6 @@ app.use(express.static(path.join(here, "..", "public")));
 const port = Number(process.env.PORT) || 3000;
 app.listen(port, () => {
   console.log(`Tenfold running at http://localhost:${port}`);
-  console.log(aiAvailable() ? "AI rewrites: on" : "AI rewrites: off (set ANTHROPIC_API_KEY to enable)");
+  const provider = activeProvider();
+  console.log(provider ? `Rewrites: on, using ${provider.name}` : "Rewrites: off (add GEMINI_API_KEY to a .env file to enable)");
 });
