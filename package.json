@@ -10,7 +10,10 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.7.0",
+    "@mozilla/readability": "^0.6.0",
     "express": "^5.3.0",
-    "rss-parser": "^3.13.0"
+    "linkedom": "^0.18.15",
+    "rss-parser": "^3.13.0",
+    "zod": "^4.6.7"
   }
 }

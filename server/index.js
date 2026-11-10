@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import { SECTORS, MAX_STORIES_PER_SECTOR } from "./sectors.js";
 import { getSectorStories, getStory } from "./news.js";
-import { rewriteStory, aiAvailable, activeProvider, RewriteError, STYLES } from "./rewrite.js";
+import { getReading, aiAvailable, activeProvider, RewriteError } from "./rewrite.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -29,7 +29,6 @@ app.get("/api/sectors", (req, res) => {
   res.json({
     sectors: SECTORS.map(({ id, name, emoji }) => ({ id, name, emoji })),
     maxStoriesPerSector: MAX_STORIES_PER_SECTOR,
-    styles: Object.entries(STYLES).map(([id, s]) => ({ id, label: s.label })),
     aiAvailable: aiAvailable(),
   });
 });
@@ -63,15 +62,16 @@ app.get("/api/stories/:id", (req, res) => {
   res.json({ story: present(story) });
 });
 
-app.get("/api/stories/:id/versions/:style", async (req, res) => {
+// The story page: full write-up, simple-English framework and Gen Z version, written in one go.
+app.get("/api/stories/:id/reading", async (req, res) => {
   const story = getStory(req.params.id);
   if (!story) return res.status(404).json({ error: "Story not found. It may have dropped out of the top stories." });
   try {
-    res.json({ style: req.params.style, text: await rewriteStory(story, req.params.style) });
+    res.json({ reading: await getReading(story) });
   } catch (error) {
     if (error instanceof RewriteError) return res.status(error.status).json({ error: error.message });
     console.error(error);
-    res.status(500).json({ error: "Something went wrong while rewriting this story." });
+    res.status(500).json({ error: "Something went wrong while writing this story." });
   }
 });
 

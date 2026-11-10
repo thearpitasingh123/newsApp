@@ -2,38 +2,49 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import { z } from "zod";
+import { fetchArticleText } from "./article.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const CACHE_FILE = path.join(here, "..", "data", "rewrites.json");
+const CACHE_FILE = path.join(here, "..", "data", "readings.json");
 
-export const STYLES = {
-  plain: {
-    label: "Plain English",
-    instructions: `Rewrite this news story for a curious reader with no background in the field.
-- Remove all jargon. Where a technical term is unavoidable, explain it in a few everyday words the first time it appears.
-- Use short sentences and everyday comparisons where they help.
-- Keep it to 2-4 short paragraphs.
-- End with one line starting "Why it matters:" that says, in plain words, why an ordinary person might care.`,
-  },
-  genz: {
-    label: "Gen Z",
-    instructions: `Rewrite this news story the way a sharp, funny creator would explain it in a short-form video (reels / shorts).
-- Open with a scroll-stopping hook.
-- Use current internet slang and a few emojis, casually - it should sound natural, not like a brand trying too hard.
-- Keep it punchy: short lines, 80-150 words total.
-- Every fact must stay accurate. The humor is in the delivery, never in changing what happened.
-- If the story involves death, violence, disaster or serious harm, keep the casual voice but drop the jokes and be respectful.`,
-  },
-};
+/*
+ * A "reading" is everything the story page shows, written in one AI request:
+ *   full  - a detailed, neutral write-up of the article
+ *   plain - the same story in simple English, following the 5-stage knowledge framework
+ *   genz  - the same story in a short-form-video voice
+ */
 
-const RULES = `You rewrite news stories in a requested style for a news-reading app.
-Rules that always apply:
-- Use only facts found in the source text. Never add numbers, names, quotes, causes or predictions that are not there.
-- If the source is short, the rewrite is short. Do not pad it with background you were not given.
-- Each rewrite is plain text: no title, no preamble, no markdown. Separate paragraphs with a blank line.`;
+const SYSTEM = `You write the reading page of a news app. You are given one news story and return three versions of it as JSON.
 
-const storyBlock = (story) =>
-  `<story>\n<headline>${story.title}</headline>\n<source>${story.source}</source>\n<text>${story.body || "(no text beyond the headline)"}</text>\n</story>`;
+Accuracy rules:
+- "full", "genz", "plain.read", "plain.takeaway" and "plain.quiz" use only facts found in the source text. Never add numbers, names, dates, quotes or causes that are not there.
+- "plain.understand" and "plain.connect" may also draw on well-established general background knowledge to explain context. Keep that background general: no invented specifics, no made-up statistics or quotes, and never present background as something this article reported. If you are not confident about a piece of background, leave it out.
+- "plain.watch" describes things to keep an eye on. It never states a prediction as fact.
+- If the source is only a short summary, keep every field proportionally short. Do not pad.
+
+Every field is plain text with no markdown and no headings. Separate paragraphs with a blank line.`;
+
+const INSTRUCTIONS = `Write these fields.
+
+"full" - the full story.
+A neutral, well-organised news article in your own words, about 300-450 words when the source has that much substance. Cover what happened, who is involved, the key numbers and dates, the most relevant quotes (attributed), the background the source gives, and what happens next. Lead with the most important point. Short paragraphs.
+
+"plain" - simple English, for a curious reader with no background in the field. No jargon; if a technical term is unavoidable, explain it in a few everyday words. Short sentences. It has these parts:
+- "read" (What happened?): the facts - key developments, people, companies, dates and numbers. 3-5 sentences.
+- "understand" (Why did it happen?): the background, causes, how it works, who is affected and what it leads to. 3-5 sentences.
+- "connect" (What does it connect to?): earlier events, the wider industry, and ideas worth knowing that this story links to. 2-4 sentences.
+- "takeaway": the one sentence worth remembering.
+- "quiz": exactly 3 questions that test the key facts of this story, each with a short answer found in the source.
+- "care" (Why should I care?): what this means for an ordinary person - an insight or a decision it could affect. 2-3 sentences.
+- "discuss": one open question that would start a good conversation about this story.
+- "watch": what to keep an eye on next. 1-2 sentences.
+
+"genz" - the story the way a sharp, funny creator would tell it in a short-form video (reels / shorts).
+Open with a scroll-stopping hook. Use current internet slang and a few emojis, casually - natural, not a brand trying too hard. Short punchy lines, about 150-200 words, and keep the substance: the key facts, numbers and why it matters all survive. Humor is in the delivery, never in changing what happened. If the story involves death, violence, disaster or serious harm, keep the casual voice but drop the jokes and be respectful.`;
+
+const PLAIN_TEXT_FIELDS = ["read", "understand", "connect", "takeaway", "care", "discuss", "watch"];
 
 export class RewriteError extends Error {
   constructor(message, status) {
@@ -42,51 +53,82 @@ export class RewriteError extends Error {
   }
 }
 
-/* ---------- Providers ----------
- * Each provider takes a story and the style that was asked for, and returns
- * { style: text } for one or more styles. Everything returned is saved.
- */
+function prompt(story, sourceText, isFullArticle) {
+  return `${INSTRUCTIONS}
 
-// Google Gemini (free tier). One request writes every style at once, so each
-// story uses the daily free quota only once.
+<story>
+<headline>${story.title}</headline>
+<publisher>${story.source}</publisher>
+<source_kind>${isFullArticle ? "full article" : "short summary only - the full article could not be read"}</source_kind>
+<text>
+${sourceText || "(no text beyond the headline)"}
+</text>
+</story>`;
+}
+
+/** Check and tidy what a model returned. Throws if the essentials are missing. */
+export function normalizeReading(raw) {
+  const text = (v) => (typeof v === "string" ? v.trim() : "");
+  const plainIn = raw?.plain ?? {};
+  const plain = {};
+  for (const f of PLAIN_TEXT_FIELDS) plain[f] = text(plainIn[f]);
+  plain.quiz = (Array.isArray(plainIn.quiz) ? plainIn.quiz : [])
+    .map((q) => ({ question: text(q?.question), answer: text(q?.answer) }))
+    .filter((q) => q.question && q.answer);
+  const reading = { full: text(raw?.full), plain, genz: text(raw?.genz) };
+  if (!reading.full || !reading.genz || !plain.read) {
+    throw new RewriteError("The story came back incomplete. Try again.", 502);
+  }
+  return reading;
+}
+
+/* ---------- Providers: each takes the prompt and returns the parsed JSON ---------- */
+
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-flash-lite-latest";
+const S = { type: "STRING" };
+const GEMINI_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    full: S,
+    plain: {
+      type: "OBJECT",
+      properties: {
+        ...Object.fromEntries(PLAIN_TEXT_FIELDS.map((f) => [f, S])),
+        quiz: {
+          type: "ARRAY",
+          items: { type: "OBJECT", properties: { question: S, answer: S }, required: ["question", "answer"] },
+        },
+      },
+      required: [...PLAIN_TEXT_FIELDS, "quiz"],
+    },
+    genz: S,
+  },
+  required: ["full", "plain", "genz"],
+};
 
-async function geminiRewrite(story) {
-  const styleIds = Object.keys(STYLES);
-  const prompt =
-    `Rewrite the news story below in ${styleIds.length} styles. Return one JSON field per style.\n\n` +
-    styleIds.map((id) => `Style "${id}":\n${STYLES[id].instructions}`).join("\n\n") +
-    `\n\n${storyBlock(story)}`;
-
+async function geminiWrite(userPrompt) {
   let res;
   try {
     res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
-      signal: AbortSignal.timeout(60000),
+      signal: AbortSignal.timeout(90000),
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: RULES }] },
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "OBJECT",
-            properties: Object.fromEntries(styleIds.map((id) => [id, { type: "STRING" }])),
-            required: styleIds,
-          },
-        },
+        systemInstruction: { parts: [{ text: SYSTEM }] },
+        contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+        generationConfig: { responseMimeType: "application/json", responseSchema: GEMINI_SCHEMA },
       }),
     });
   } catch (error) {
     console.error("[rewrite] Gemini unreachable:", error.cause?.message || error.message);
-    throw new RewriteError("The rewrite service couldn't be reached. Try again shortly.", 502);
+    throw new RewriteError("The writing service couldn't be reached. Try again shortly.", 502);
   }
 
   if (!res.ok) {
     const detail = (await res.json().catch(() => null))?.error?.message || "";
     console.error(`[rewrite] Gemini error ${res.status}: ${detail}`);
     if (res.status === 429) {
-      throw new RewriteError("The free rewrite quota is used up for now. Try again later (the daily quota resets overnight, US Pacific time).", 429);
+      throw new RewriteError("The free daily quota is used up for now. Try again later (it resets overnight, US Pacific time).", 429);
     }
     if (res.status === 400 || res.status === 401 || res.status === 403) {
       throw new RewriteError("The Gemini API key on the server was rejected.", 503);
@@ -94,7 +136,7 @@ async function geminiRewrite(story) {
     if (res.status === 404) {
       throw new RewriteError(`The Gemini model "${GEMINI_MODEL}" isn't available. Set GEMINI_MODEL on the server to a current model.`, 503);
     }
-    throw new RewriteError("The rewrite service had a problem. Try again shortly.", 502);
+    throw new RewriteError("The writing service had a problem. Try again shortly.", 502);
   }
 
   const data = await res.json();
@@ -104,62 +146,60 @@ async function geminiRewrite(story) {
     console.warn("[rewrite] Gemini returned no text:", data.promptFeedback?.blockReason || candidate?.finishReason);
     throw new RewriteError("This story can't be rewritten.", 422);
   }
-  let parsed;
   try {
-    parsed = JSON.parse(text);
+    return JSON.parse(text);
   } catch {
-    throw new RewriteError("The rewrite came back garbled. Try again.", 502);
+    console.warn("[rewrite] Gemini returned invalid JSON, finish reason:", candidate?.finishReason);
+    throw new RewriteError("The story came back garbled. Try again.", 502);
   }
-  const out = {};
-  for (const id of styleIds) {
-    if (typeof parsed[id] === "string" && parsed[id].trim()) out[id] = parsed[id].trim();
-  }
-  return out;
 }
 
-// Claude (paid). One request per style, made only when that tab is opened.
+// Claude (paid alternative).
 const CLAUDE_MODEL = "claude-haiku-5-5";
+const ClaudeSchema = z.object({
+  full: z.string(),
+  plain: z.object({
+    ...Object.fromEntries(PLAIN_TEXT_FIELDS.map((f) => [f, z.string()])),
+    quiz: z.array(z.object({ question: z.string(), answer: z.string() })),
+  }),
+  genz: z.string(),
+});
 let claude;
 
-async function claudeRewrite(story, style) {
+async function claudeWrite(userPrompt) {
   claude ??= new Anthropic();
   let response;
   try {
-    response = await claude.messages.create({
+    response = await claude.messages.parse({
       model: CLAUDE_MODEL,
-      max_tokens: 8000,
-      output_config: { effort: "low" },
-      system: RULES,
-      messages: [{ role: "user", content: `${STYLES[style].instructions}\n\n${storyBlock(story)}` }],
+      max_tokens: 16000,
+      output_config: { effort: "low", format: zodOutputFormat(ClaudeSchema) },
+      system: SYSTEM,
+      messages: [{ role: "user", content: userPrompt }],
     });
   } catch (error) {
     if (error instanceof Anthropic.AuthenticationError) {
       throw new RewriteError("The Claude API key on the server was rejected.", 503);
     } else if (error instanceof Anthropic.RateLimitError) {
-      throw new RewriteError("Too many rewrites at once. Try again in a moment.", 429);
+      throw new RewriteError("Too many requests at once. Try again in a moment.", 429);
     } else if (error instanceof Anthropic.APIError) {
       console.error(`[rewrite] Claude error ${error.status}: ${error.message}`);
-      throw new RewriteError("The rewrite service had a problem. Try again shortly.", 502);
+      throw new RewriteError("The writing service had a problem. Try again shortly.", 502);
     }
     throw error;
   }
-  if (response.stop_reason === "refusal") {
-    throw new RewriteError("This story can't be rewritten in that style.", 422);
+  if (response.stop_reason === "refusal" || !response.parsed_output) {
+    throw new RewriteError("This story can't be rewritten.", 422);
   }
-  const text = response.content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("")
-    .trim();
-  return text ? { [style]: text } : {};
+  return response.parsed_output;
 }
 
 const PROVIDERS = {
-  gemini: { name: "Google Gemini", ready: () => Boolean(process.env.GEMINI_API_KEY), rewrite: geminiRewrite },
+  gemini: { name: "Google Gemini", ready: () => Boolean(process.env.GEMINI_API_KEY), write: geminiWrite },
   claude: {
     name: "Claude",
     ready: () => Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN),
-    rewrite: claudeRewrite,
+    write: claudeWrite,
   },
 };
 
@@ -171,7 +211,7 @@ export function activeProvider() {
 }
 export const aiAvailable = () => activeProvider() !== null;
 
-/* ---------- Saved rewrites ---------- */
+/* ---------- Saved readings ---------- */
 
 let saved = {};
 try {
@@ -185,35 +225,44 @@ function persist() {
   fs.promises
     .mkdir(path.dirname(CACHE_FILE), { recursive: true })
     .then(() => fs.promises.writeFile(CACHE_FILE, JSON.stringify(saved)))
-    .catch((e) => console.warn("[rewrite] could not save rewrites:", e.message));
+    .catch((e) => console.warn("[rewrite] could not save readings:", e.message));
 }
 
-export async function rewriteStory(story, style) {
-  if (!STYLES[style]) throw new RewriteError(`Unknown style "${style}"`, 404);
+// Sample stories carry hand-written text, so the app can be tried without any key.
+function sampleReading(story) {
+  const [read, care = ""] = story.versions.plain.split("\n\nWhy it matters: ");
+  return {
+    full: story.body,
+    plain: { read, understand: "", connect: "", takeaway: "", quiz: [], care, discuss: "", watch: "" },
+    genz: story.versions.genz,
+    basedOn: "sample",
+  };
+}
 
-  // Sample stories ship with hand-written versions, so the app can be tried without any key.
-  if (story.versions?.[style]) return story.versions[style];
-
-  const key = `${story.id}:${style}`;
-  if (saved[key]) return saved[key];
+/**
+ * Everything the story page needs. Written once per story, then served from disk.
+ * `basedOn` says whether the full article could be read ("article") or only the feed's summary ("summary").
+ */
+export async function getReading(story, { readArticle = fetchArticleText } = {}) {
+  if (story.versions) return sampleReading(story);
+  if (saved[story.id]) return saved[story.id];
 
   const provider = activeProvider();
   if (!provider) {
     throw new RewriteError("Rewrites are switched off: no AI key is configured on the server.", 503);
   }
 
-  // If the same story is already being rewritten (e.g. both tabs opened quickly), wait for that request.
-  const flightKey = provider.rewrite === geminiRewrite ? story.id : key;
-  if (!inFlight.has(flightKey)) {
-    inFlight.set(
-      flightKey,
-      provider.rewrite(story, style).finally(() => inFlight.delete(flightKey)),
-    );
+  // If this story is already being written (e.g. opened in two tabs), wait for that request.
+  if (!inFlight.has(story.id)) {
+    const job = (async () => {
+      const articleText = story.url ? await readArticle(story.url) : "";
+      const raw = await provider.write(prompt(story, articleText || story.body, Boolean(articleText)));
+      const reading = { ...normalizeReading(raw), basedOn: articleText ? "article" : "summary" };
+      saved[story.id] = reading;
+      persist();
+      return reading;
+    })().finally(() => inFlight.delete(story.id));
+    inFlight.set(story.id, job);
   }
-  const result = await inFlight.get(flightKey);
-
-  for (const [id, text] of Object.entries(result)) saved[`${story.id}:${id}`] = text;
-  persist();
-  if (!saved[key]) throw new RewriteError("The rewrite came back empty. Try again.", 502);
-  return saved[key];
+  return inFlight.get(story.id);
 }

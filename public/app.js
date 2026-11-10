@@ -5,7 +5,7 @@ const pickerChips = document.getElementById("picker-chips");
 const pickerDone = document.getElementById("picker-done");
 
 const STORAGE_KEY = "tenfold.sectors";
-let config = { sectors: [], styles: [], maxStoriesPerSector: 10 };
+let config = { sectors: [], maxStoriesPerSector: 10 };
 let mySectors = loadMySectors();
 
 function loadMySectors() {
@@ -113,6 +113,50 @@ async function showSector(id) {
      <div style="margin-top:16px">${stories.map((st, i) => card(st, i + 1)).join("") || '<p class="empty">Nothing new here right now.</p>'}</div>`;
 }
 
+const TABS = [
+  { id: "full", label: "Full story" },
+  { id: "plain", label: "Plain English" },
+  { id: "genz", label: "Gen Z" },
+];
+
+const paragraphs = (text) =>
+  text
+    .split(/\n\s*\n/)
+    .filter((p) => p.trim())
+    .map((p) => `<p>${esc(p.trim())}</p>`)
+    .join("");
+
+// The Plain English tab: the 5-stage knowledge framework.
+function plainHtml(plain) {
+  const stage = (n, name, question, body, note = "") =>
+    body
+      ? `<section class="stage">
+          <p class="stage-label"><span class="stage-num">${n}</span> ${name}</p>
+          <h2>${question}</h2>
+          ${body}
+          ${note ? `<p class="stage-note">${note}</p>` : ""}
+        </section>`
+      : "";
+  const background = "Background added by AI. It can be out of date, so treat it as context, not news.";
+  const quiz = plain.quiz.length
+    ? `<div class="quiz"><p class="quiz-title">Quick quiz - answer in your head, then tap to check</p>${plain.quiz
+        .map((q) => `<details><summary>${esc(q.question)}</summary><p>${esc(q.answer)}</p></details>`)
+        .join("")}</div>`
+    : "";
+  const retain = (plain.takeaway ? `<p class="takeaway">${esc(plain.takeaway)}</p>` : "") + quiz;
+  const apply =
+    (plain.care ? paragraphs(plain.care) : "") +
+    (plain.discuss ? `<p><strong>Talk about it:</strong> ${esc(plain.discuss)}</p>` : "") +
+    (plain.watch ? `<p><strong>Watch next:</strong> ${esc(plain.watch)}</p>` : "");
+  return (
+    stage("01", "Read", "What happened?", plain.read && paragraphs(plain.read)) +
+    stage("02", "Understand", "Why did it happen?", plain.understand && paragraphs(plain.understand), background) +
+    stage("03", "Connect", "What does it connect to?", plain.connect && paragraphs(plain.connect), background) +
+    stage("04", "Retain", "What will I remember?", retain) +
+    stage("05", "Apply", "Why should I care?", apply)
+  );
+}
+
 async function showStory(id) {
   view.innerHTML = skeleton(6);
   let story;
@@ -126,44 +170,59 @@ async function showStory(id) {
   const sector = sectorById(story.sectorId);
   renderTabs(story.sectorId);
 
-  const styles = [{ id: "original", label: "Original" }, ...config.styles];
   const others = story.sources.filter((s) => s.url && s.url !== story.url);
   view.innerHTML = `<article class="story">
       <a class="back" href="#/sector/${sector.id}">← ${sector.emoji} ${esc(sector.name)}</a>
       <p class="meta" style="margin:0 0 8px">${story.sample ? '<span class="badge">Sample</span>' : esc(story.source)} · ${timeAgo(story.publishedAt)}</p>
       <h1>${esc(story.title)}</h1>
       <div class="styles" role="tablist" aria-label="Reading style">
-        ${styles.map((s, i) => `<button role="tab" type="button" data-style="${s.id}" aria-selected="${i === 0}">${esc(s.label)}</button>`).join("")}
+        ${TABS.map((t, i) => `<button role="tab" type="button" data-style="${t.id}" aria-selected="${i === 0}">${t.label}</button>`).join("")}
       </div>
       <div class="story-text" id="story-text" role="tabpanel" aria-live="polite"></div>
-      ${story.url ? `<a class="read-more" href="${esc(story.url)}" target="_blank" rel="noopener">Read the full article at ${esc(story.source)} ↗</a>` : ""}
+      ${story.url ? `<a class="read-more" href="${esc(story.url)}" target="_blank" rel="noopener">Read the original at ${esc(story.source)} ↗</a>` : ""}
       ${others.length ? `<p class="also">Also covered by ${others.map((s) => `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.name)}</a>`).join(", ")}</p>` : ""}
     </article>`;
 
   const textEl = document.getElementById("story-text");
-  const loaded = { original: story.body || "The publisher gave only a headline for this story. Open the full article to read more." };
-  let current = "original";
+  const teaser = story.body ? paragraphs(story.body) : "";
+  let current = "full";
+  let reading = null;
+  let failure = null;
 
-  async function select(style) {
-    current = style;
-    for (const b of view.querySelectorAll(".styles button")) b.setAttribute("aria-selected", String(b.dataset.style === style));
-    textEl.className = `story-text ${style}`;
-    if (!loaded[style]) {
-      textEl.innerHTML = skeleton(5);
-      try {
-        loaded[style] = (await api(`/api/stories/${story.id}/versions/${style}`)).text;
-      } catch (error) {
-        if (current === style) textEl.innerHTML = `<p class="notice">${esc(error.message)}</p>`;
-        return;
-      }
+  function render() {
+    for (const b of view.querySelectorAll(".styles button")) b.setAttribute("aria-selected", String(b.dataset.style === current));
+    textEl.className = `story-text ${current}`;
+    if (reading) {
+      const note =
+        reading.basedOn === "summary"
+          ? '<p class="notice">The full article couldn\'t be read, so this is based on the publisher\'s short summary.</p>'
+          : "";
+      textEl.innerHTML = note + (current === "plain" ? plainHtml(reading.plain) : paragraphs(reading[current]));
+    } else if (failure) {
+      // Keep the publisher's summary readable on the first tab even when writing failed.
+      textEl.innerHTML = `<p class="notice">${esc(failure)}</p>` + (current === "full" ? teaser : "");
+    } else {
+      textEl.innerHTML =
+        (current === "full" ? teaser : "") +
+        `<p class="writing">Reading the full article and writing your version…</p>${skeleton(6)}`;
     }
-    if (current === style) textEl.textContent = loaded[style];
   }
+
   view.querySelector(".styles").addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-style]");
-    if (btn) select(btn.dataset.style);
+    if (!btn) return;
+    current = btn.dataset.style;
+    render();
   });
-  select("original");
+  render();
+
+  try {
+    ({ reading } = await api(`/api/stories/${story.id}/reading`));
+  } catch (error) {
+    failure = error.message;
+  }
+  // Only update the page if the reader is still on this story.
+  if (textEl.isConnected) render();
 }
 
 /* Sector picker */
