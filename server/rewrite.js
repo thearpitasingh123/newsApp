@@ -5,7 +5,7 @@ import Anthropic from "@anthropic-ai/sdk";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CACHE_FILE = path.join(here, "..", "data", "rewrites.json");
-const MODEL = "claude-opus-5-5";
+const MODEL = "claude-haiku-5-5";
 
 export const STYLES = {
   plain: {
@@ -69,11 +69,9 @@ export async function rewriteStory(story, style) {
 
   let response;
   try {
-    response = await client.beta.messages.create({
+    response = await client.messages.create({
       model: MODEL,
       max_tokens: 8000,
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default", // if the model declines, the API retries on a fallback model
       output_config: { effort: "low" },
       system: SYSTEM,
       messages: [
