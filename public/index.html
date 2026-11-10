@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f6f4ef" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#131416" media="(prefers-color-scheme: dark)" />
+    <title>Tenfold</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#/">Tenfold<span class="brand-dot">.</span></a>
+      <button class="ghost" id="edit-sectors" type="button">My sectors</button>
+    </header>
+    <nav class="tabs" id="tabs" aria-label="Sectors"></nav>
+    <main id="view" tabindex="-1"></main>
+
+    <dialog id="picker">
+      <form method="dialog" class="picker">
+        <h2>What do you want to follow?</h2>
+        <p class="muted">Pick your sectors. The order you pick them in is the order they appear.</p>
+        <div class="chips" id="picker-chips"></div>
+        <button class="primary" id="picker-done" value="done">Done</button>
+      </form>
+    </dialog>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
