@@ -51,7 +51,7 @@ function card(story, rank) {
   const sources = story.sample
     ? '<span class="badge">Sample</span>'
     : esc(story.sources.map((s) => s.name).join(" · "));
-  return `<a class="card" href="#/story/${esc(story.id)}">
+  return `<a class="card" href="#/story/${esc(story.sectorId)}/${esc(story.id)}">
     ${rank ? `<span class="rank">${rank}</span>` : ""}
     <div>
       <h3>${esc(story.title)}</h3>
@@ -67,15 +67,20 @@ function sampleNotice(stories) {
 }
 
 function renderTabs(activeId) {
-  const ordered = [...mySectors.map(sectorById), ...config.sectors.filter((s) => !mySectors.includes(s.id))].filter(Boolean);
+  // Tabs for the sectors you follow, plus the one you're looking at if it isn't one of them.
+  const ids = mySectors.includes(activeId) || activeId === "overview" ? mySectors : [...mySectors, activeId];
   tabs.innerHTML =
     `<a class="tab" href="#/" ${activeId === "overview" ? 'aria-current="page"' : ""}>Overview</a>` +
-    ordered
+    ids
+      .map(sectorById)
+      .filter(Boolean)
       .map(
         (s) =>
           `<a class="tab" href="#/sector/${s.id}" ${activeId === s.id ? 'aria-current="page"' : ""}>${s.emoji} ${esc(s.name)}</a>`,
       )
-      .join("");
+      .join("") +
+    `<button class="tab tab-add" type="button" id="tab-add">+ More</button>`;
+  document.getElementById("tab-add").addEventListener("click", openPicker);
   tabs.querySelector('[aria-current="page"]')?.scrollIntoView({ block: "nearest", inline: "center" });
 }
 
@@ -157,14 +162,14 @@ function plainHtml(plain) {
   );
 }
 
-async function showStory(id) {
+async function showStory(sectorId, id) {
   view.innerHTML = skeleton(6);
   let story;
   try {
     ({ story } = await api(`/api/stories/${id}`));
   } catch {
-    // The server only remembers stories it has listed; refresh the lists once and retry.
-    await api(`/api/overview?sectors=`);
+    // The server only remembers stories it has listed; reload that sector's list once and retry.
+    await api(`/api/sectors/${sectorId}/stories`);
     ({ story } = await api(`/api/stories/${id}`));
   }
   const sector = sectorById(story.sectorId);
@@ -227,13 +232,20 @@ async function showStory(id) {
 
 /* Sector picker */
 function renderPicker() {
-  pickerChips.innerHTML = config.sectors
-    .map((s) => {
-      const pos = mySectors.indexOf(s.id);
-      return `<button type="button" class="chip" data-id="${s.id}" aria-pressed="${pos >= 0}">
-        ${pos >= 0 ? `<span class="order">${pos + 1}</span>` : ""}${s.emoji} ${esc(s.name)}
-      </button>`;
-    })
+  const groups = [...new Set(config.sectors.map((s) => s.group))];
+  pickerChips.innerHTML = groups
+    .map(
+      (group) =>
+        `<h3 class="chip-group">${esc(group)}</h3><div class="chips">${config.sectors
+          .filter((s) => s.group === group)
+          .map((s) => {
+            const pos = mySectors.indexOf(s.id);
+            return `<button type="button" class="chip" data-id="${s.id}" aria-pressed="${pos >= 0}">
+              ${pos >= 0 ? `<span class="order">${pos + 1}</span>` : ""}${s.emoji} ${esc(s.name)}
+            </button>`;
+          })
+          .join("")}</div>`,
+    )
     .join("");
   pickerDone.disabled = mySectors.length === 0;
 }
@@ -259,10 +271,10 @@ function openPicker() {
 
 /* Routing */
 async function route() {
-  const [, kind, id] = location.hash.split("/");
+  const [, kind, a, b] = location.hash.split("/");
   try {
-    if (kind === "sector") await showSector(id);
-    else if (kind === "story") await showStory(id);
+    if (kind === "sector") await showSector(a);
+    else if (kind === "story") await showStory(a, b);
     else await showOverview();
   } catch (error) {
     view.innerHTML = `<p class="empty">${esc(error.message)}</p>`;

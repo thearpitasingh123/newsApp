@@ -13,7 +13,8 @@ npm start
 
 Open http://localhost:3000.
 
-- **Live news** comes from the RSS feeds listed in `server/sectors.js`. If none can be
+- **Live news** comes from the RSS feeds listed in `server/sectors.js` (20 sectors). Run
+  `npm run check-feeds` to see which feeds are reachable and how many stories each returns. If none can be
   reached, the app shows clearly labelled sample stories instead.
 - **The story page** is written by AI from the full article: when you open a live story, the
   server reads the article from the publisher and writes all three tabs with Google Gemini's

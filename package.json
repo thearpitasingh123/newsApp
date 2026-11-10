@@ -6,7 +6,8 @@
   "description": "A calm news reader: pick your sectors, max 10 stories each, three reading styles.",
   "scripts": {
     "start": "node --env-file-if-exists=.env server/index.js",
-    "test": "node --test"
+    "test": "node --test",
+    "check-feeds": "node scripts/check-feeds.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.7.0",

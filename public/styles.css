@@ -60,6 +60,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   color: var(--muted); border: 1px solid transparent;
 }
 .tab[aria-current="page"] { background: var(--text); color: var(--bg); }
+.tab-add { background: none; border: 1px dashed var(--line); cursor: pointer; }
 
 main { padding: 4px 16px 64px; outline: none; }
 
@@ -158,6 +159,12 @@ dialog {
 }
 dialog::backdrop { background: rgb(0 0 0 / 0.5); }
 .picker { padding: 24px 20px 20px; display: grid; gap: 14px; }
+.picker-list { max-height: 55vh; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+.chip-group {
+  font-size: 0.76rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--muted); margin: 14px 0 8px;
+}
+.chip-group:first-child { margin-top: 0; }
 .picker h2 { font-size: 1.3rem; letter-spacing: -0.01em; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip {

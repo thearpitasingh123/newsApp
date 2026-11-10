@@ -27,7 +27,7 @@ function present(story) {
 
 app.get("/api/sectors", (req, res) => {
   res.json({
-    sectors: SECTORS.map(({ id, name, emoji }) => ({ id, name, emoji })),
+    sectors: SECTORS.map(({ id, name, emoji, group }) => ({ id, name, emoji, group })),
     maxStoriesPerSector: MAX_STORIES_PER_SECTOR,
     aiAvailable: aiAvailable(),
   });
@@ -39,7 +39,7 @@ app.get("/api/overview", async (req, res) => {
   const wanted = String(req.query.sectors || "")
     .split(",")
     .filter((id) => known.has(id));
-  const ids = wanted.length ? [...new Set(wanted)] : SECTORS.map((s) => s.id);
+  const ids = [...new Set(wanted)];
   const sections = await Promise.all(
     ids.map(async (id) => ({
       sectorId: id,
