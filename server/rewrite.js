@@ -4,39 +4,39 @@ import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
-import { fetchArticleText } from "./article.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const CACHE_FILE = path.join(here, "..", "data", "readings.json");
+const CACHE_FILE = path.join(here, "..", "data", "stories.json");
 
 /*
  * A "reading" is everything the story page shows, written in one AI request:
- *   full  - a detailed, neutral write-up of the article
+ *   full  - a neutral write-up combining what every outlet reported
  *   plain - the same story in simple English, following the 5-stage knowledge framework
  *   genz  - the same story in a short-form-video voice
  */
 
-const SYSTEM = `You write the reading page of a news app. You are given one news story and return three versions of it as JSON.
+const SYSTEM = `You write the reading page of a news app. You are given the headline of one news story and the short summaries that news outlets published about it in their RSS feeds, and you return three versions of it as JSON, in your own words.
 
 Accuracy rules:
-- "full", "genz", "plain.read", "plain.takeaway" and "plain.quiz" use only facts found in the source text. Never add numbers, names, dates, quotes or causes that are not there.
-- "plain.understand" and "plain.connect" may also draw on well-established general background knowledge to explain context. Keep that background general: no invented specifics, no made-up statistics or quotes, and never present background as something this article reported. If you are not confident about a piece of background, leave it out.
+- "full", "genz", "plain.read", "plain.takeaway" and "plain.quiz" use only facts found in the headline and summaries. Never add numbers, names, dates, quotes or causes that are not there.
+- "plain.understand" and "plain.connect" may also draw on well-established general background knowledge to explain context. Keep that background general: no invented specifics, no made-up statistics or quotes, and never present background as something these outlets reported. If you are not confident about a piece of background, leave it out.
 - "plain.watch" describes things to keep an eye on. It never states a prediction as fact.
-- If the source is only a short summary, keep every field proportionally short. Do not pad.
+- Never copy sentences from the summaries. Write everything fresh, in your own words.
+- Length follows the facts available. When there is little to go on, keep those fields short rather than padding them.
 
 Every field is plain text with no markdown and no headings. Separate paragraphs with a blank line.`;
 
 const INSTRUCTIONS = `Write these fields.
 
 "full" - the full story.
-A neutral, well-organised news article in your own words, about 300-450 words when the source has that much substance. Cover what happened, who is involved, the key numbers and dates, the most relevant quotes (attributed), the background the source gives, and what happens next. Lead with the most important point. Short paragraphs.
+A neutral, well-organised news article that brings together the facts from every outlet's summary, up to about 300 words. Cover what happened, who is involved, the key numbers and dates, and what happens next, as far as the summaries say. Lead with the most important point. Short paragraphs. Do not quote the summaries.
 
 "plain" - simple English, for a curious reader with no background in the field. No jargon; if a technical term is unavoidable, explain it in a few everyday words. Short sentences. It has these parts:
 - "read" (What happened?): the facts - key developments, people, companies, dates and numbers. 3-5 sentences.
 - "understand" (Why did it happen?): the background, causes, how it works, who is affected and what it leads to. 3-5 sentences.
 - "connect" (What does it connect to?): earlier events, the wider industry, and ideas worth knowing that this story links to. 2-4 sentences.
 - "takeaway": the one sentence worth remembering.
-- "quiz": exactly 3 questions that test the key facts of this story, each with a short answer found in the source.
+- "quiz": exactly 3 questions that test the key facts of this story, each with a short answer found in the headline or summaries.
 - "care" (Why should I care?): what this means for an ordinary person - an insight or a decision it could affect. 2-3 sentences.
 - "discuss": one open question that would start a good conversation about this story.
 - "watch": what to keep an eye on next. 1-2 sentences.
@@ -53,16 +53,16 @@ export class RewriteError extends Error {
   }
 }
 
-function prompt(story, sourceText, isFullArticle) {
+function prompt(story) {
+  const summaries = (story.summaries?.length ? story.summaries : [{ source: story.source, text: story.body }])
+    .filter((s) => s.text)
+    .map((s) => `<summary outlet="${s.source}">${s.text}</summary>`)
+    .join("\n");
   return `${INSTRUCTIONS}
 
 <story>
 <headline>${story.title}</headline>
-<publisher>${story.source}</publisher>
-<source_kind>${isFullArticle ? "full article" : "short summary only - the full article could not be read"}</source_kind>
-<text>
-${sourceText || "(no text beyond the headline)"}
-</text>
+${summaries || "<summary>(no summary beyond the headline)</summary>"}
 </story>`;
 }
 
@@ -235,15 +235,15 @@ function sampleReading(story) {
     full: story.body,
     plain: { read, understand: "", connect: "", takeaway: "", quiz: [], care, discuss: "", watch: "" },
     genz: story.versions.genz,
-    basedOn: "sample",
   };
 }
 
 /**
  * Everything the story page needs. Written once per story, then served from disk.
- * `basedOn` says whether the full article could be read ("article") or only the feed's summary ("summary").
+ * It is written only from the headline and the summaries outlets put in their RSS feeds:
+ * the app never fetches publishers' web pages.
  */
-export async function getReading(story, { readArticle = fetchArticleText } = {}) {
+export async function getReading(story) {
   if (story.versions) return sampleReading(story);
   if (saved[story.id]) return saved[story.id];
 
@@ -255,9 +255,7 @@ export async function getReading(story, { readArticle = fetchArticleText } = {})
   // If this story is already being written (e.g. opened in two tabs), wait for that request.
   if (!inFlight.has(story.id)) {
     const job = (async () => {
-      const articleText = story.url ? await readArticle(story.url) : "";
-      const raw = await provider.write(prompt(story, articleText || story.body, Boolean(articleText)));
-      const reading = { ...normalizeReading(raw), basedOn: articleText ? "article" : "summary" };
+      const reading = normalizeReading(await provider.write(prompt(story)));
       saved[story.id] = reading;
       persist();
       return reading;

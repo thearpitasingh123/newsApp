@@ -21,4 +21,5 @@ test("merges the same event from different outlets and ranks it first", () => {
   ], 10, now);
   assert.equal(out.length, 2);
   assert.equal(out[0].sources.length, 2);
+  assert.deepEqual(out[0].summaries.map((x) => x.source), ["A", "B"]);
 });

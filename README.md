@@ -16,9 +16,16 @@ Open http://localhost:3000.
 - **Live news** comes from the RSS feeds listed in `server/sectors.js` (20 sectors). Run
   `npm run check-feeds` to see which feeds are reachable and how many stories each returns. If none can be
   reached, the app shows clearly labelled sample stories instead.
-- **The story page** is written by AI from the full article: when you open a live story, the
-  server reads the article from the publisher and writes all three tabs with Google Gemini's
-  free tier. Sample stories come with pre-written text and need no key.
+- **The story page** is written by AI (Google Gemini's free tier) from the headline and the short
+  summaries that outlets publish in their RSS feeds. The app never fetches publishers' web
+  pages. Sample stories come with pre-written text and need no key.
+
+## What the app reads, and why
+
+To stay clear of publishers' terms, the app only uses RSS feeds the way they are offered:
+headlines, short summaries and links. It does not download or store full articles, and every
+story page is new text written from those facts, credited to the outlets with a link to
+the original. It is meant for running on your own computer for your own reading.
 
 ## Turning on rewrites (free)
 
@@ -27,9 +34,9 @@ Open http://localhost:3000.
 3. Run `npm start`. The console should say `Rewrites: on, using Google Gemini`.
 
 Each story is written once, with a single request for all three tabs, and the result is
-saved in `data/readings.json`. Opening a story for the first time uses one request from the
+saved in `data/stories.json`. Opening a story for the first time uses one request from the
 free tier's daily limit; when that runs out, the story page says so and shows the
-publisher's short summary until the next day.
+feed's short summary until the next day.
 
 Claude is also supported: set `ANTHROPIC_API_KEY` (and `AI_PROVIDER=claude` if both keys
 are present). That one is paid.

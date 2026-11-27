@@ -198,18 +198,14 @@ async function showStory(sectorId, id) {
     for (const b of view.querySelectorAll(".styles button")) b.setAttribute("aria-selected", String(b.dataset.style === current));
     textEl.className = `story-text ${current}`;
     if (reading) {
-      const note =
-        reading.basedOn === "summary"
-          ? '<p class="notice">The full article couldn\'t be read, so this is based on the publisher\'s short summary.</p>'
-          : "";
-      textEl.innerHTML = note + (current === "plain" ? plainHtml(reading.plain) : paragraphs(reading[current]));
+textEl.innerHTML = (current === "plain" ? plainHtml(reading.plain) : paragraphs(reading[current]));
     } else if (failure) {
       // Keep the publisher's summary readable on the first tab even when writing failed.
       textEl.innerHTML = `<p class="notice">${esc(failure)}</p>` + (current === "full" ? teaser : "");
     } else {
       textEl.innerHTML =
         (current === "full" ? teaser : "") +
-        `<p class="writing">Reading the full article and writing your version…</p>${skeleton(6)}`;
+        `<p class="writing">Writing your version…</p>${skeleton(6)}`;
     }
   }
 

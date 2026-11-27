@@ -62,7 +62,12 @@ export function rankStories(articles, limit = MAX_STORIES_PER_SECTOR, now = Date
     const publishedAt = Math.max(...group.map((a) => a.publishedAt));
     const hoursOld = Math.max(0, (now - publishedAt) / 3600000);
     const score = sources.length * 2 + Math.max(0, 1 - hoursOld / 48) * 3;
-    return { ...lead, publishedAt, sources, score };
+    // Every outlet's own feed summary: together they give the writer more facts than any one alone.
+    const summaries = [];
+    for (const a of group) {
+      if (a.body && !summaries.some((s) => s.source === a.source)) summaries.push({ source: a.source, text: a.body });
+    }
+    return { ...lead, publishedAt, sources, summaries, score };
   });
 
   return stories.sort((a, b) => b.score - a.score).slice(0, limit);
